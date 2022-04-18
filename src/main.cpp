@@ -79,7 +79,6 @@ RetroEnvironment(unsigned cmd, void *data)
             *(const char **)data = ".";
             return true;
         default:
-            //CoreLog(RETRO_LOG_DEBUG, "Unhandled env #%u\n", cmd);
             return false;
     }
 
