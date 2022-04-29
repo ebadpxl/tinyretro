@@ -34,6 +34,9 @@ std::unordered_map<sf::Keyboard::Key, unsigned> gKeyBinding {
 // joypad; each joypads should have their own mapping state.
 unsigned gJoy[RETRO_DEVICE_ID_JOYPAD_R3+1] = {0};
 
+// Video Format used by the core.
+retro_pixel_format gCoreFormat = RETRO_PIXEL_FORMAT_UNKNOWN;
+
 void
 CoreLog(retro_log_level level, char const* fmt, ...)
 {
@@ -69,9 +72,7 @@ RetroEnvironment(unsigned cmd, void *data)
             break;
         case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT: {
             const enum retro_pixel_format *fmt = (enum retro_pixel_format *)data;
-            // TODO(sgosselin): this is just to prototype, but we should support more fmt.
-            if (*fmt != RETRO_PIXEL_FORMAT_XRGB8888)
-                DIE("unsupported pixel format");
+            gCoreFormat = *fmt;
             return true;
         }
         case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY:
@@ -96,16 +97,33 @@ RetroVideoRefresh(void const *_data, unsigned width, unsigned height, size_t pit
         gCoreFramebuffer.create(width, height);
     }
 
-    // XXX(sgosselin): It seems the buffer is in BGRA format, instead of XRGB. Because
-    // I don't want to make an extra copy, I'm just gonna fixup the provided buffer on-the-fly
-    // despite the buffer supposed to be const. It's just a prototype, that's fine. :)
-    uint8_t *data = (uint8_t *)_data;
-    for (size_t i = 0; i < width*height; ++i) {
-        std::swap(data[4 * i], data[4 * i + 2]);
-        data[4 * i + 3] = 255;
+
+    if (gCoreFormat == RETRO_PIXEL_FORMAT_XRGB8888) {
+        uint8_t *data = (uint8_t *)_data;
+        // XXX(sgosselin): It seems the buffer is in BGRA format, instead of XRGB. Because
+        // I don't want to make an extra copy, I'm just gonna fixup the provided buffer on-the-fly
+        // despite the buffer supposed to be const. It's just a prototype, that's fine. :)
+        for (size_t i = 0; i < width*height; ++i) {
+            std::swap(data[4 * i], data[4 * i + 2]);
+            data[4 * i + 3] = 255;
+        }
+        gCoreFramebuffer.update((sf::Uint8 const*)data);
+    } else if (gCoreFormat == RETRO_PIXEL_FORMAT_RGB565) {
+        std::vector<uint8_t> newbuf(width * height * 4);
+
+        uint16_t *data = (uint16_t *)_data;
+        for (size_t i = 0; i < width*height; ++i) {
+            uint32_t r = (data[i] & 0xf800) >> 11;
+            uint32_t g = (data[i] & 0x07e0) >> 5;
+            uint32_t b = (data[i] & 0x001f);
+            newbuf[4*i + 0] = (255.f / 31.f) * r;
+            newbuf[4*i + 1] = (255.f / 63.f) * g;
+            newbuf[4*i + 2] = (255.f / 31.f) * b;
+            newbuf[4*i + 3] = 255;
+        }
+        gCoreFramebuffer.update(&newbuf[0]);
     }
 
-    gCoreFramebuffer.update((sf::Uint8 const*)data);
 }
 
 void
