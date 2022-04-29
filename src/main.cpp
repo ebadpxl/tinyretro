@@ -16,9 +16,6 @@
 // Retro.
 Core gCore;
 
-// SFML Window
-sf::Texture gCoreFramebuffer;
-
 // SFML key to libretro joypad mapping.
 std::unordered_map<sf::Keyboard::Key, unsigned> gKeyBinding {
     { sf::Keyboard::Up, RETRO_DEVICE_ID_JOYPAD_UP },
@@ -36,6 +33,13 @@ unsigned gJoy[RETRO_DEVICE_ID_JOYPAD_R3+1] = {0};
 
 // Video Format used by the core.
 retro_pixel_format gCoreFormat = RETRO_PIXEL_FORMAT_UNKNOWN;
+
+/// Represents a video buffer (retro<->SFML).
+struct VideoBuffer {
+    retro_pixel_format      pixelFormat;    // libretro pixel format
+    sf::Texture             texture;        // SFML backing texture
+    std::vector<uint8_t>    pixelData;      // pixel data to be uploaded to SFML
+} gVideoBuffer;
 
 void
 CoreLog(retro_log_level level, char const* fmt, ...)
@@ -72,7 +76,7 @@ RetroEnvironment(unsigned cmd, void *data)
             break;
         case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT: {
             const enum retro_pixel_format *fmt = (enum retro_pixel_format *)data;
-            gCoreFormat = *fmt;
+            gVideoBuffer.pixelFormat = *fmt;
             return true;
         }
         case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY:
@@ -89,41 +93,39 @@ RetroEnvironment(unsigned cmd, void *data)
 void
 RetroVideoRefresh(void const *_data, unsigned width, unsigned height, size_t pitch)
 {
-    // Resize the framebuffer texture if needed. This should only happen once when
+    // Resize the video buffer if needed. This should only happen once when
     // the libretro core is initialized.
-    bool resizeTexture = (width != gCoreFramebuffer.getSize().x)
-        || (height != gCoreFramebuffer.getSize().y);
+    bool resizeTexture = (width != gVideoBuffer.texture.getSize().x)
+        || (height != gVideoBuffer.texture.getSize().y);
     if (resizeTexture) {
-        gCoreFramebuffer.create(width, height);
+        gVideoBuffer.texture.create(width, height);
+        gVideoBuffer.pixelData.resize(width * height * 4);
     }
 
-
-    if (gCoreFormat == RETRO_PIXEL_FORMAT_XRGB8888) {
-        uint8_t *data = (uint8_t *)_data;
-        // XXX(sgosselin): It seems the buffer is in BGRA format, instead of XRGB. Because
-        // I don't want to make an extra copy, I'm just gonna fixup the provided buffer on-the-fly
-        // despite the buffer supposed to be const. It's just a prototype, that's fine. :)
-        for (size_t i = 0; i < width*height; ++i) {
-            std::swap(data[4 * i], data[4 * i + 2]);
-            data[4 * i + 3] = 255;
+    if (gVideoBuffer.pixelFormat == RETRO_PIXEL_FORMAT_XRGB8888) {
+        uint8_t const *data = (uint8_t const *)data;
+        for (size_t i = 0; i < width * height; ++i) {
+            gVideoBuffer.pixelData[4 * i + 0] = data[4 * i + 2];
+            gVideoBuffer.pixelData[4 * i + 1] = data[4 * i + 1];
+            gVideoBuffer.pixelData[4 * i + 2] = data[4 * i + 0];
+            gVideoBuffer.pixelData[4 * i + 3] = 255;
         }
-        gCoreFramebuffer.update((sf::Uint8 const*)data);
-    } else if (gCoreFormat == RETRO_PIXEL_FORMAT_RGB565) {
-        std::vector<uint8_t> newbuf(width * height * 4);
-
-        uint16_t *data = (uint16_t *)_data;
+    } else if (gVideoBuffer.pixelFormat == RETRO_PIXEL_FORMAT_RGB565) {
+        uint16_t const *data = (uint16_t const *)_data;
         for (size_t i = 0; i < width*height; ++i) {
             uint32_t r = (data[i] & 0xf800) >> 11;
             uint32_t g = (data[i] & 0x07e0) >> 5;
             uint32_t b = (data[i] & 0x001f);
-            newbuf[4*i + 0] = (255.f / 31.f) * r;
-            newbuf[4*i + 1] = (255.f / 63.f) * g;
-            newbuf[4*i + 2] = (255.f / 31.f) * b;
-            newbuf[4*i + 3] = 255;
+            gVideoBuffer.pixelData[4 * i + 0] = (255.f / 31.f) * ((data[i] & 0xf800) >> 11);
+            gVideoBuffer.pixelData[4 * i + 1] = (255.f / 63.f) * ((data[i] & 0x07e0) >> 5);
+            gVideoBuffer.pixelData[4 * i + 2] = (255.f / 31.f) * ((data[i] & 0x001f));
+            gVideoBuffer.pixelData[4 * i + 3] = 255;
         }
-        gCoreFramebuffer.update(&newbuf[0]);
+    } else {
+        DIE("failed to convert libretro pixel format (fmt=%d)", (int)gVideoBuffer.pixelFormat);
     }
 
+    gVideoBuffer.texture.update(&gVideoBuffer.pixelData[0]);
 }
 
 void
@@ -240,7 +242,7 @@ int main(int argc, char *argv[]) {
         gCore.retro_run();
 
         window.clear(sf::Color::Black);
-        sf::Sprite sprite(gCoreFramebuffer);
+        sf::Sprite sprite(gVideoBuffer.texture);
         sprite.setScale(
             window.getSize().x / sprite.getLocalBounds().width,
             window.getSize().y / sprite.getLocalBounds().height);
