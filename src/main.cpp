@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <fstream>
 #include <unordered_map>
+#include <vector>
 
 #include <SFML/Graphics.hpp>
 
@@ -77,15 +78,12 @@ CoreLog(retro_log_level level, char const* fmt, ...)
 bool
 RetroEnvironment(unsigned cmd, void *data)
 {
-    bool *bval;
-
     switch (cmd) {
         case RETRO_ENVIRONMENT_GET_LOG_INTERFACE:
             ((struct retro_log_callback *) data)->log = CoreLog;
             break;
         case RETRO_ENVIRONMENT_GET_CAN_DUPE:
-            bval = (bool*)data;
-            *bval = true;
+            *((bool*)data) = true;
             break;
         case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT:
             gVideoBuffer.pixelFormat = *((retro_pixel_format *) data);
