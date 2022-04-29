@@ -13,10 +13,26 @@
         exit(-1); \
     } while (0)
 
+// SFML Window.
+#define WIN_W 800
+#define WIN_H 600
+sf::RenderWindow gWindow(sf::VideoMode(WIN_W, WIN_H), ".: TinyRetro :.");
+
 // Retro.
 Core gCore;
 
 // SFML key to libretro joypad mapping.
+#define USE_LIGHTGUN 1
+#ifdef USE_LIGHTGUN
+std::unordered_map<sf::Keyboard::Key, unsigned> gKeyBinding {
+    { sf::Keyboard::Z, RETRO_DEVICE_ID_LIGHTGUN_START},
+    { sf::Keyboard::X, RETRO_DEVICE_ID_LIGHTGUN_SELECT},
+    { sf::Keyboard::A, RETRO_DEVICE_ID_LIGHTGUN_AUX_A},
+    { sf::Keyboard::S, RETRO_DEVICE_ID_LIGHTGUN_AUX_B},
+    { sf::Keyboard::Enter, RETRO_DEVICE_ID_LIGHTGUN_TRIGGER},
+    { sf::Keyboard::Space, RETRO_DEVICE_ID_LIGHTGUN_RELOAD},
+};
+#else
 std::unordered_map<sf::Keyboard::Key, unsigned> gKeyBinding {
     { sf::Keyboard::Up, RETRO_DEVICE_ID_JOYPAD_UP },
     { sf::Keyboard::Down, RETRO_DEVICE_ID_JOYPAD_DOWN },
@@ -26,6 +42,7 @@ std::unordered_map<sf::Keyboard::Key, unsigned> gKeyBinding {
     { sf::Keyboard::Z, RETRO_DEVICE_ID_JOYPAD_A},
     { sf::Keyboard::X, RETRO_DEVICE_ID_JOYPAD_B},
 };
+#endif
 
 // Stores which buttons are pressed on the first joypad. Note that only support a single
 // joypad; each joypads should have their own mapping state.
@@ -98,7 +115,19 @@ RetroVideoRefresh(void const *_data, unsigned width, unsigned height, size_t pit
         gVideoBuffer.pixelData.resize(width * height * 4);
     }
 
-    if (gVideoBuffer.pixelFormat == RETRO_PIXEL_FORMAT_XRGB8888) {
+    if (gVideoBuffer.pixelFormat == RETRO_PIXEL_FORMAT_0RGB1555) {
+        // XXX(sgosselin): something odd is happening with PCSX. It seems to
+        // select the RGB565 format but when somehow the core calls this function
+        // with this format set up. For now, let's just do the RGB565 conversion
+        // but it's worth digging into what's happening.
+        uint16_t const *data = (uint16_t const *)_data;
+        for (size_t i = 0; i < width*height; ++i) {
+            gVideoBuffer.pixelData[4 * i + 0] = (255.f / 31.f) * ((data[i] & 0xf800) >> 11);
+            gVideoBuffer.pixelData[4 * i + 1] = (255.f / 63.f) * ((data[i] & 0x07e0) >> 5);
+            gVideoBuffer.pixelData[4 * i + 2] = (255.f / 31.f) * ((data[i] & 0x001f));
+            gVideoBuffer.pixelData[4 * i + 3] = 255;
+        }
+    } else if (gVideoBuffer.pixelFormat == RETRO_PIXEL_FORMAT_XRGB8888) {
         uint8_t const *data = (uint8_t const *)data;
         for (size_t i = 0; i < width * height; ++i) {
             gVideoBuffer.pixelData[4 * i + 0] = data[4 * i + 2];
@@ -127,13 +156,23 @@ RetroInputPoll(void)
     for (auto const& key: gKeyBinding) {
         gJoy[key.second] = sf::Keyboard::isKeyPressed(key.first);
     }
+
+#ifdef USE_LIGHTGUN
+    float mouseX = sf::Mouse::getPosition(gWindow).x / ((float) gWindow.getSize().x);
+    float mouseY = sf::Mouse::getPosition(gWindow).y / ((float) gWindow.getSize().y);
+    // libretro expects mouse (x, y) in screen space so do the conversion here.
+    int screenPosX = 0x8000 * (2 * mouseX - 1);
+    int screenPosY = 0x8000 * (2 * mouseY - 1);
+    gJoy[RETRO_DEVICE_ID_LIGHTGUN_SCREEN_X] = screenPosX;
+    gJoy[RETRO_DEVICE_ID_LIGHTGUN_SCREEN_Y] = screenPosY;
+#endif
 }
 
 int16_t
 RetroInputState(unsigned port, unsigned device, unsigned index, unsigned id)
 {
     // Only a single joypad is supported so ignore other requests from the core.
-    if ((port != 0) || (index != 0) || (device != RETRO_DEVICE_JOYPAD))
+    if ((port != 0) || (index != 0))
         return 0;
     return gJoy[id];
 }
@@ -210,21 +249,24 @@ int main(int argc, char *argv[]) {
         DIE("couldn't load rom into libretro core");
 
     // Assign a joypad to the first slot.
+#ifdef USE_LIGHTGUN
+    gCore.retro_set_controller_port_device(0, RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_LIGHTGUN, 0));
+#else
     gCore.retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
+#endif
 
     // Open an SFML window that runs at 60 FPS since the NES roughly runs at 60Hz.
-    sf::RenderWindow window(sf::VideoMode(800, 600), ".: TinyRetro :.");
-    window.setFramerateLimit(60);
-    while (window.isOpen()) {
+    gWindow.setFramerateLimit(60);
+    while (gWindow.isOpen()) {
         sf::Event event;
-        while (window.pollEvent(event)) {
+        while (gWindow.pollEvent(event)) {
             if (event.type == sf::Event::Closed)
-                window.close();
+                gWindow.close();
             if (event.type == sf::Event::KeyPressed) {
                 switch (event.key.code) {
                     case sf::Keyboard::Escape:
                     case sf::Keyboard::Q:
-                        window.close();
+                        gWindow.close();
                         break;
                     default:
                         break;
@@ -234,13 +276,13 @@ int main(int argc, char *argv[]) {
 
         gCore.retro_run();
 
-        window.clear(sf::Color::Black);
+        gWindow.clear(sf::Color::Black);
         sf::Sprite sprite(gVideoBuffer.texture);
         sprite.setScale(
-            window.getSize().x / sprite.getLocalBounds().width,
-            window.getSize().y / sprite.getLocalBounds().height);
-        window.draw(sprite);
-        window.display();
+            gWindow.getSize().x / sprite.getLocalBounds().width,
+            gWindow.getSize().y / sprite.getLocalBounds().height);
+        gWindow.draw(sprite);
+        gWindow.display();
     }
 
     return 0;
