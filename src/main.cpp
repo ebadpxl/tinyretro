@@ -87,11 +87,13 @@ RetroEnvironment(unsigned cmd, void *data)
             break;
         case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT:
             gVideoBuffer.pixelFormat = *((retro_pixel_format *) data);
-            return true;
+            break;
         case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY:
+            *(const char **)data = ".";
+            break;
         case RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY:
             *(const char **)data = ".";
-            return true;
+            break;
         default:
             return false;
     }
