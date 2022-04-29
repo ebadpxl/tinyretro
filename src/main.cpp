@@ -14,9 +14,7 @@
     } while (0)
 
 // SFML Window.
-#define WIN_W 800
-#define WIN_H 600
-sf::RenderWindow gWindow(sf::VideoMode(WIN_W, WIN_H), ".: TinyRetro :.");
+sf::RenderWindow gWindow(sf::VideoMode(800, 600), ".: TinyRetro :.");
 
 // Retro.
 Core gCore;
@@ -117,9 +115,9 @@ RetroVideoRefresh(void const *_data, unsigned width, unsigned height, size_t pit
 
     if (gVideoBuffer.pixelFormat == RETRO_PIXEL_FORMAT_0RGB1555) {
         // XXX(sgosselin): something odd is happening with PCSX. It seems to
-        // select the RGB565 format but when somehow the core calls this function
-        // with this format set up. For now, let's just do the RGB565 conversion
-        // but it's worth digging into what's happening.
+        // initially select the RGB565 format. However, it calls the video refresh
+        // callback with this pixel format. For now, let's do the RGB565 conversion
+        // but it's worth digging into later.
         uint16_t const *data = (uint16_t const *)_data;
         for (size_t i = 0; i < width*height; ++i) {
             gVideoBuffer.pixelData[4 * i + 0] = (255.f / 31.f) * ((data[i] & 0xf800) >> 11);
