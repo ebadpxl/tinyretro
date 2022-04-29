@@ -109,9 +109,6 @@ RetroVideoRefresh(void const *_data, unsigned width, unsigned height, size_t pit
     } else if (gVideoBuffer.pixelFormat == RETRO_PIXEL_FORMAT_RGB565) {
         uint16_t const *data = (uint16_t const *)_data;
         for (size_t i = 0; i < width*height; ++i) {
-            uint32_t r = (data[i] & 0xf800) >> 11;
-            uint32_t g = (data[i] & 0x07e0) >> 5;
-            uint32_t b = (data[i] & 0x001f);
             gVideoBuffer.pixelData[4 * i + 0] = (255.f / 31.f) * ((data[i] & 0xf800) >> 11);
             gVideoBuffer.pixelData[4 * i + 1] = (255.f / 63.f) * ((data[i] & 0x07e0) >> 5);
             gVideoBuffer.pixelData[4 * i + 2] = (255.f / 31.f) * ((data[i] & 0x001f));
